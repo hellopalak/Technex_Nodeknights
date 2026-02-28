@@ -7,11 +7,12 @@ const { normalizeCategory } = require("../utils/helpers");
 exports.analyze = async (req, res) => {
   try {
     const { imageBase64, mimeType, imageName } = req.body;
-    if (!imageBase64) {
+    const cleanedImageBase64 = String(imageBase64 || "").replace(/^data:.*;base64,/, "").trim();
+    if (!cleanedImageBase64) {
       return res.status(400).json({ message: "imageBase64 is required." });
     }
 
-    const aiResult = await analyzeWasteWithGemini(imageBase64, mimeType);
+    const aiResult = await analyzeWasteWithGemini(cleanedImageBase64, mimeType);
     const carbonSavedKg = estimateCarbonSaved(
       aiResult.category,
       aiResult.estimatedWeightKg,
