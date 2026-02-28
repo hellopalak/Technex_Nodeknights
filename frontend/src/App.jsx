@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import "./App.css";
-import { Routes, Route, Link, Navigate } from "react-router-dom";
+import "./styles/Pages.css";
+import { Routes, Route, Navigate } from "react-router-dom";
+import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard";
 import Analyze from "./pages/Analyze";
 import CarbonRecords from "./pages/CarbonRecords";
+import VoiceChatbot from "./pages/VoiceChatbot";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api";
 
@@ -150,61 +153,93 @@ function App() {
 
   if (!token) {
     return (
-      <div className="container">
-        <h1>Waste Analyzer</h1>
-        <div className="row">
-          <button type="button" onClick={() => setMode("login")} disabled={mode === "login"}>Login</button>
-          <button type="button" onClick={() => setMode("register")} disabled={mode === "register"}>Register</button>
+      <div className="app-wrapper">
+        <div className="app-content">
+          <div className="auth-container">
+            <div className="auth-header">
+              <h2>♻️ WasteWise</h2>
+              <p>{mode === "login" ? "Sign in to your account" : "Create a new account"}</p>
+            </div>
+
+            <div className="row mb-2">
+              <button
+                className={mode === "login" ? "btn-primary" : "btn-secondary"}
+                type="button"
+                onClick={() => setMode("login")}
+              >
+                Login
+              </button>
+              <button
+                className={mode === "register" ? "btn-primary" : "btn-secondary"}
+                type="button"
+                onClick={() => setMode("register")}
+              >
+                Register
+              </button>
+            </div>
+
+            {error && <div className="error">{error}</div>}
+
+            <form onSubmit={handleAuthSubmit} className="form">
+              {mode === "register" && (
+                <div className="form-group">
+                  <label htmlFor="name">Full Name</label>
+                  <input
+                    id="name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+              <div className="form-group">
+                <label htmlFor="email">Email Address</label>
+                <input
+                  id="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+              <button type="submit" className="btn-primary" disabled={loading}>
+                {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
+              </button>
+            </form>
+          </div>
         </div>
-
-        <form onSubmit={handleAuthSubmit} className="form">
-          {mode === "register" && (
-            <input
-              placeholder="Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          )}
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-          />
-          <button type="submit" disabled={loading}>{loading ? "Please wait..." : mode}</button>
-        </form>
-
-        {error && <p className="error">{error}</p>}
       </div>
     );
   }
 
   return (
-    <div>
-      <nav className="nav">
-        <Link to="/dashboard">Dashboard</Link>
-        <Link to="/analyze">Analyze</Link>
-        <Link to="/records">Carbon Records</Link>
-      </nav>
-
-      {error && <p className="error">{error}</p>}
-
-      <Routes>
-        <Route path="/dashboard" element={<Dashboard user={user} summary={summary} history={history} logout={logout} />} />
-        <Route path="/analyze" element={<Analyze file={file} setFile={setFile} analyze={analyze} loading={loading} latestAnalysis={latestAnalysis} />} />
-        <Route path="/records" element={<CarbonRecords history={history} />} />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+    <div className="app-wrapper">
+      <Navbar user={user} logout={logout} />
+      <div className="app-content">
+        {error && <div className="container mt-2"><div className="error">{error}</div></div>}
+        <Routes>
+          <Route path="/dashboard" element={<Dashboard user={user} summary={summary} history={history} />} />
+          <Route path="/analyze" element={<Analyze file={file} setFile={setFile} analyze={analyze} loading={loading} latestAnalysis={latestAnalysis} />} />
+          <Route path="/records" element={<CarbonRecords history={history} />} />
+          <Route path="/chatbot" element={<VoiceChatbot token={token} />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </div>
     </div>
   );
 }
