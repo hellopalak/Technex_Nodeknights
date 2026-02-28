@@ -15,6 +15,8 @@ const wasteClassificationSchema = new mongoose.Schema(
     carbonSavedKg: { type: Number, min: 0, default: 0 },
     carbonEquivalent: { type: String, default: "" },
     reason: { type: String, default: "" },
+    modelLabel: { type: String, default: "" },
+    classProbabilities: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
 );

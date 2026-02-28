@@ -24,12 +24,21 @@ function cosineSimilarity(a, b) {
 
 function buildWasteContextText(entry) {
   const alternatives = Array.isArray(entry.alternativeActions) ? entry.alternativeActions.join(", ") : "";
+  const classifiedAt = entry.createdAt ? new Date(entry.createdAt).toISOString() : "unknown date";
+  const modelInfo = entry.modelLabel ? `Model label: ${entry.modelLabel}.` : "";
+  const probabilities = entry.classProbabilities
+    ? `Class probabilities: ${JSON.stringify(entry.classProbabilities)}.`
+    : "";
   return [
+    `Classified at: ${classifiedAt}.`,
     `Waste item: ${entry.itemType || "Unknown item"}.`,
     `Category: ${entry.category || "unknown"}.`,
+    `Confidence: ${entry.confidence || 0}.`,
     `Recommended action: ${entry.recommendedAction || "n/a"}.`,
     `Carbon saved: ${entry.carbonSavedKg || 0} kg CO2e.`,
     `Reason: ${entry.reason || "n/a"}.`,
+    modelInfo,
+    probabilities,
     alternatives ? `Alternative actions: ${alternatives}.` : "",
   ]
     .filter(Boolean)
