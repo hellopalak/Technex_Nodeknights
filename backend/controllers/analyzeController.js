@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const { WasteClassification } = require("../models/WasteClassification");
 const { classifyWasteWithLocalModel } = require("../utils/localWasteModel");
+const { generateAnalyzeInsightsWithGemini } = require("../utils/gemini");
 const { estimateCarbonSaved, getCarbonEquivalent } = require("../utils/carbon");
 
 exports.analyze = async (req, res) => {
@@ -49,18 +50,59 @@ exports.analyze = async (req, res) => {
       category = "recyclable"; // Default to recyclable
     }
 
-    // Calculate carbon metrics
-    const carbonSavedKg = estimateCarbonSaved(
+    // Find user
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    // Gemini insight step (after local classification).
+    const dashboardSnapshot = {
+      totalCarbonSavedKg: user.totalCarbonSavedKg || 0,
+      totalItemsManaged: user.totalItemsManaged || 0,
+      totalAnalyses: user.totalAnalyses || 0,
+      categoryCounts: user.categoryCounts || {},
+    };
+
+    const geminiInsights = await generateAnalyzeInsightsWithGemini({
+      imageBase64: cleanedImageBase64,
+      mimeType,
+      predictedCategory: category === "recyclable" ? "reusable" : category,
+      confidence: Number(aiResult.confidence || 0),
+      itemType: String(aiResult.itemType || "Unknown"),
+      estimatedWeightKg: Number(aiResult.estimatedWeightKg || 0.2),
+      dashboardSnapshot,
+    });
+
+    const geminiReason = String(geminiInsights?.reason || "");
+    const geminiUsed = geminiReason && !geminiReason.toLowerCase().includes("fallback");
+    if (!geminiUsed) {
+      console.warn(`[Analyze] Gemini fallback used. Reason: ${geminiReason || "Unknown"}`);
+    }
+
+    const recommendedAction = String(
+      geminiInsights?.recommendedAction || aiResult.recommendedAction || "Segregate for appropriate disposal."
+    );
+    const alternativeActions = Array.isArray(geminiInsights?.alternativeActions)
+      ? geminiInsights.alternativeActions.map((v) => String(v)).slice(0, 3)
+      : Array.isArray(aiResult.alternativeActions)
+        ? aiResult.alternativeActions.map(String).slice(0, 3)
+        : [];
+
+    // Calculate carbon metrics (Gemini estimate first, deterministic fallback next).
+    const geminiCarbon = Number(geminiInsights?.estimatedCarbonSavedKg);
+    const ruleBasedCarbon = estimateCarbonSaved(
       category,
       aiResult.estimatedWeightKg,
-      aiResult.recommendedAction
+      recommendedAction
     );
-    
-    if (isNaN(carbonSavedKg) || carbonSavedKg < 0) {
+    let validCarbonSaved = Number.isFinite(geminiCarbon) && geminiCarbon > 0
+      ? Number(geminiCarbon.toFixed(2))
+      : ruleBasedCarbon;
+
+    if (isNaN(validCarbonSaved) || validCarbonSaved < 0) {
       console.warn("[Analyze] Invalid carbon calculation, defaulting to 0.5kg");
-      var validCarbonSaved = 0.5;
-    } else {
-      var validCarbonSaved = carbonSavedKg;
+      validCarbonSaved = 0.5;
     }
 
     const carbonEquivalent = getCarbonEquivalent(validCarbonSaved);
@@ -73,22 +115,16 @@ exports.analyze = async (req, res) => {
       category,
       confidence: Number(aiResult.confidence || 0),
       estimatedWeightKg: Number(aiResult.estimatedWeightKg || 0.2),
-      recommendedAction: String(aiResult.recommendedAction || "Segregate for appropriate disposal."),
-      alternativeActions: Array.isArray(aiResult.alternativeActions) 
-        ? aiResult.alternativeActions.map(String) 
-        : [],
+      recommendedAction,
+      alternativeActions,
       carbonSavedKg: validCarbonSaved,
       carbonEquivalent,
-      reason: String(aiResult.reason || "Classified by local TensorFlow model."),
+      reason: String(
+        geminiInsights?.reason || aiResult.reason || "Classified by local TensorFlow model."
+      ),
       modelLabel: String(aiResult.modelLabel || aiResult.itemType || "Unknown"),
       classProbabilities: aiResult.classProbabilities || {},
     };
-
-    // Find user
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
 
     // Save analysis to database
     let analysis;
@@ -131,6 +167,17 @@ exports.analyze = async (req, res) => {
       analysis: {
         ...analysis.toObject(),
         category, // Ensure correct category is returned
+      },
+      dashboardData: {
+        totalCarbonSavedKg: user.totalCarbonSavedKg,
+        totalItemsManaged: user.totalItemsManaged,
+        totalAnalyses: user.totalAnalyses,
+        categoryCounts: user.categoryCounts,
+      },
+      geminiSummary: String(geminiInsights?.dashboardSummary || ""),
+      geminiStatus: {
+        used: geminiUsed,
+        reason: geminiReason || "No reason provided.",
       },
     });
   } catch (error) {

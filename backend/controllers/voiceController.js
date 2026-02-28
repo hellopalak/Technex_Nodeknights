@@ -217,7 +217,6 @@ exports.chat = async (req, res) => {
         embedding: userEmbedding,
         language: "en",
         source: "chat",
-        contextKey: "",
       });
 
       assistantTurn = await BotContext.create({
@@ -228,7 +227,6 @@ exports.chat = async (req, res) => {
         embedding: replyEmbedding,
         language: "en",
         source: "chat",
-        contextKey: "",
       });
     } catch (error) {
       console.warn("ECO chat turn save skipped:", error.message);

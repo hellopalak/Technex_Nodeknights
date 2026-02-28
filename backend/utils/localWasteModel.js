@@ -45,6 +45,7 @@ function defaultLabels() {
   return ["biodegradable", "recyclable", "hazardous"];
 }
 
+
 function getActionPreset(category) {
   const categoryMap = {
     "biodegradable": {
