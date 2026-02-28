@@ -9,6 +9,17 @@ import CarbonRecords from "./pages/CarbonRecords";
 import VoiceChatbot from "./pages/VoiceChatbot";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api";
+const EMPTY_SUMMARY = {
+  totalCarbonSavedKg: 0,
+  totalItemsManaged: 0,
+  totalAnalyses: 0,
+  categoryStats: {
+    biodegradable: { count: 0, co2SavedKg: 0 },
+    hazardous: { count: 0, co2SavedKg: 0 },
+    reusable: { count: 0, co2SavedKg: 0 },
+  },
+  dailyStats: [],
+};
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -30,7 +41,7 @@ function App() {
   const [password, setPassword] = useState("");
 
   const [user, setUser] = useState(null);
-  const [summary, setSummary] = useState({ totalCarbonSavedKg: 0, totalItemsManaged: 0, totalAnalyses: 0 });
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [history, setHistory] = useState([]);
   const [file, setFile] = useState(null);
   const [latestAnalysis, setLatestAnalysis] = useState(null);
@@ -60,7 +71,12 @@ function App() {
       });
       const summaryData = await summaryResponse.json();
       if (!summaryResponse.ok) throw new Error(summaryData.message || "Failed to load summary");
-      setSummary(summaryData.totals || { totalCarbonSavedKg: 0, totalItemsManaged: 0, totalAnalyses: 0 });
+      setSummary({
+        ...EMPTY_SUMMARY,
+        ...(summaryData.totals || {}),
+        categoryStats: summaryData.categoryStats || EMPTY_SUMMARY.categoryStats,
+        dailyStats: summaryData.dailyStats || [],
+      });
 
       const historyResponse = await fetch(`${API_BASE}/dashboard/history`, {
         headers: { Authorization: `Bearer ${currentToken}` },
@@ -112,7 +128,7 @@ function App() {
     localStorage.removeItem("wastewise_token");
     setToken("");
     setUser(null);
-    setSummary({ totalCarbonSavedKg: 0, totalItemsManaged: 0, totalAnalyses: 0 });
+    setSummary(EMPTY_SUMMARY);
     setHistory([]);
     setFile(null);
     setLatestAnalysis(null);
@@ -140,7 +156,7 @@ function App() {
       });
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Analyze failed");
+      if (!response.ok) throw new Error(data.error || data.message || "Analyze failed");
 
       setLatestAnalysis(data.analysis || null);
       await loadDashboard(token);

@@ -10,10 +10,18 @@ function safeParseJSON(text) {
 
 function normalizeCategory(raw) {
   const value = (raw || "").toLowerCase().trim();
-  if (value.includes("bio")) return "biodegradable";
+  
+  // Match biodegradable (including typos)
+  if (value.includes("biodi") || value.includes("bio")) return "biodegradable";
+  
+  // Match hazardous  
   if (value.includes("haz")) return "hazardous";
-  if (value.includes("reuse") || value.includes("recycl")) return "reusable";
-  return "reusable";
+  
+  // Match recyclable/reusable
+  if (value.includes("recy") || value.includes("reuse")) return "recyclable";
+  
+  // Default
+  return "recyclable";
 }
 
 module.exports = {

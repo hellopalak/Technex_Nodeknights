@@ -1,5 +1,3 @@
-const { safeParseJSON, normalizeCategory } = require("./helpers");
-
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || "").trim();
 const DEFAULT_TEXT_MODELS = [
   process.env.GEMINI_TEXT_MODEL,
@@ -26,18 +24,6 @@ async function fetchWithTimeout(url, options, timeoutMs = GEMINI_TIMEOUT_MS) {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-function extractJsonObject(text) {
-  if (!text) return null;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end < 0 || end <= start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
   }
 }
 
@@ -99,88 +85,6 @@ async function callGeminiGenerateContent(parts, models = DEFAULT_TEXT_MODELS) {
   }
 
   throw new Error(`Gemini request failed. ${lastError}. Check internet/firewall and Gemini API availability.`);
-}
-
-async function analyzeWasteWithGemini(imageBase64, mimeType) {
-  if (!GEMINI_API_KEY) {
-    return {
-      itemType: "Unknown item",
-      category: "reusable",
-      confidence: 0.55,
-      estimatedWeightKg: 0.2,
-      recommendedAction:
-        "Gemini API key missing. Set GEMINI_API_KEY, then retry for AI-based classification.",
-      alternativeActions: [
-        "Keep dry waste separate from wet waste",
-        "Check local recycling guidelines",
-        "Avoid mixed disposal to improve recovery rate",
-      ],
-      reason: "Fallback response was used because API key is not configured.",
-    };
-  }
-
-  const prompt = `
-You are a waste segregation and climate impact assistant.
-Classify the waste item in this image into exactly one category:
-- biodegradable
-- hazardous
-- reusable
-
-Reply strictly in JSON with this schema:
-{
-  "itemType": "short item name",
-  "category": "biodegradable|hazardous|reusable",
-  "confidence": 0.0 to 1.0,
-  "estimatedWeightKg": number,
-  "recommendedAction": "single best action to reduce maximum carbon footprint",
-  "alternativeActions": ["action 1", "action 2", "action 3"],
-  "reason": "why this category and action were chosen"
-}
-No markdown, no extra text.
-`.trim();
-
-  try {
-    const outputText = await callGeminiGenerateContent([
-      { text: prompt },
-      {
-        inlineData: {
-          mimeType: mimeType || "image/jpeg",
-          data: imageBase64,
-        },
-      },
-    ]);
-    const parsed = safeParseJSON(outputText) || extractJsonObject(outputText);
-
-    return {
-      itemType: parsed?.itemType || "Unknown item",
-      category: normalizeCategory(parsed?.category),
-      confidence: Number(parsed?.confidence) >= 0 ? Number(parsed.confidence) : 0.7,
-      estimatedWeightKg:
-        Number(parsed?.estimatedWeightKg) > 0 ? Number(parsed.estimatedWeightKg) : 0.2,
-      recommendedAction:
-        parsed?.recommendedAction ||
-        "Segregate this item and route it through an approved recycling center.",
-      alternativeActions: Array.isArray(parsed?.alternativeActions)
-        ? parsed.alternativeActions.slice(0, 3)
-        : [],
-      reason: parsed?.reason || "Model returned an incomplete response.",
-    };
-  } catch (error) {
-    return {
-      itemType: "Unknown item",
-      category: "reusable",
-      confidence: 0.5,
-      estimatedWeightKg: 0.2,
-      recommendedAction:
-        "Image analysis failed. Try a clearer image (jpg/png/webp) and ensure stable internet.",
-      alternativeActions: [
-        "Use bright lighting and a close-up image",
-        "Avoid blurry or multiple-item images",
-        "Retry after a few seconds",
-      ],
-      reason: `Fallback response used because AI image analysis failed: ${error.message}`,
-    };
-  }
 }
 
 async function createTextEmbedding(text) {
@@ -256,4 +160,4 @@ ${userMessage}
   }
 }
 
-module.exports = { analyzeWasteWithGemini, createTextEmbedding, generateEcoReply };
+module.exports = { createTextEmbedding, generateEcoReply };
