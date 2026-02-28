@@ -1,0 +1,50 @@
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+input,
+button {
+  padding: 8px;
+  border: 1px solid #bfbfbf;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  background: #f3f3f3;
+}
+
+.card {
+  border: 1px solid #d9d9d9;
+  padding: 12px;
+  margin-top: 12px;
+  border-radius: 4px;
+}
+
+.error {
+  color: #b00020;
+}
+
+.history-item {
+  border-top: 1px solid #ececec;
+  padding-top: 8px;
+  margin-top: 8px;
+}
