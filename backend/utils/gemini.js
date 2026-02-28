@@ -1,25 +1,48 @@
-const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || "").trim();
-const DEFAULT_TEXT_MODELS = [
+const { safeParseJSON } = require("./helpers");
+
+const API_KEY = String(process.env.GEMINI_API_KEY || "").trim();
+const API_BASE = (process.env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
+const TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 20000);
+
+const TEXT_MODELS = [
   process.env.GEMINI_TEXT_MODEL,
   "gemini-2.5-flash",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
 ].filter(Boolean);
-const DEFAULT_EMBEDDING_MODELS = [
+
+const VISION_MODELS = [
+  process.env.GEMINI_VISION_MODEL,
+  "gemini-1.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash",
+].filter(Boolean);
+
+const EMBEDDING_MODELS = [
   process.env.GEMINI_EMBEDDING_MODEL,
   "text-embedding-004",
   "embedding-001",
 ].filter(Boolean);
-const GEMINI_API_BASE = (process.env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
-const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 15000);
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function hasApiKey() {
+  return Boolean(API_KEY);
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = GEMINI_TIMEOUT_MS) {
+function extractJsonObject(text) {
+  if (!text) return null;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWithTimeout(url, options) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
@@ -27,73 +50,150 @@ async function fetchWithTimeout(url, options, timeoutMs = GEMINI_TIMEOUT_MS) {
   }
 }
 
-function buildGeminiUrls(model, action) {
+function endpointUrls(model, action) {
   return [
-    `${GEMINI_API_BASE}/v1beta/models/${model}:${action}?key=${GEMINI_API_KEY}`,
-    `${GEMINI_API_BASE}/v1/models/${model}:${action}?key=${GEMINI_API_KEY}`,
+    `${API_BASE}/v1beta/models/${model}:${action}?key=${API_KEY}`,
+    `${API_BASE}/v1/models/${model}:${action}?key=${API_KEY}`,
   ];
 }
 
-async function callGeminiGenerateContent(parts, models = DEFAULT_TEXT_MODELS) {
-  if (!GEMINI_API_KEY) {
+async function generateContent(parts, models) {
+  if (!hasApiKey()) {
     throw new Error("GEMINI_API_KEY is missing.");
   }
 
   let lastError = "Unknown Gemini error.";
-
   for (const model of models) {
-    const urls = buildGeminiUrls(model, "generateContent");
+    const urls = endpointUrls(model, "generateContent");
     for (const url of urls) {
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        try {
-          const response = await fetchWithTimeout(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts }] }),
-          });
+      try {
+        const response = await fetchWithTimeout(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts }] }),
+        });
 
-          if (!response.ok) {
-            const errText = await response.text();
-            lastError = `${model}: ${response.status} ${errText}`;
-            // Retry only likely transient failures.
-            if ((response.status === 429 || response.status >= 500) && attempt < 2) {
-              await delay(350);
-              continue;
-            }
-            break;
-          }
-
-          const data = await response.json();
-          const output = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("\n") || "";
-          if (output.trim()) return output;
-
-          lastError = `${model}: Empty response content.`;
-          break;
-        } catch (error) {
-          lastError = `${model}: ${error.message}`;
-          if (attempt < 2) {
-            await delay(350);
-            continue;
-          }
+        if (!response.ok) {
+          const errText = await response.text();
+          lastError = `${model}: ${response.status} ${errText}`;
+          continue;
         }
+
+        const data = await response.json();
+        const output = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("\n") || "";
+        if (output.trim()) return output.trim();
+        lastError = `${model}: Empty response content.`;
+      } catch (error) {
+        lastError = `${model}: ${error.message}`;
       }
     }
   }
 
-  if (lastError.includes("PERMISSION_DENIED") || lastError.includes("API key not valid")) {
-    throw new Error("Gemini auth failed. Check GEMINI_API_KEY and API access permissions.");
+  throw new Error(lastError);
+}
+
+function fallbackAnalyzeInsights(category, dashboardSnapshot, reason) {
+  const d = dashboardSnapshot || {};
+  let recommendation = "";
+  if (category === "biodegradable") {
+    recommendation = "Put this in wet waste.\nCompost if possible.\nKeep it separate from dry plastic waste.";
+  } else if (category === "hazardous") {
+    recommendation = "Keep this in a separate hazardous bin.\nDo not mix with household waste.\nSend it to an authorized hazardous or e-waste center.";
+  } else {
+    recommendation = "Clean and dry this item.\nPut it in the dry recyclable bin.\nPrefer reuse if it is still usable.";
   }
 
-  throw new Error(`Gemini request failed. ${lastError}. Check internet/firewall and Gemini API availability.`);
+  return {
+    recommendedAction: recommendation,
+    alternativeActions: [
+      "Use separate bins for wet, dry, and hazardous waste",
+      "Avoid contamination while segregating",
+      "Follow local municipal collection rules",
+    ],
+    estimatedCarbonSavedKg: null,
+    reason,
+    dashboardSummary: `Current totals: ${Number(d.totalItemsManaged || 0)} items managed, ${Number(d.totalAnalyses || 0)} analyses, ${Number(d.totalCarbonSavedKg || 0).toFixed(2)} kg CO2e saved.`,
+  };
+}
+
+async function generateAnalyzeInsightsWithGemini({
+  imageBase64,
+  mimeType,
+  predictedCategory,
+  confidence,
+  itemType,
+  estimatedWeightKg,
+  dashboardSnapshot,
+}) {
+  if (!hasApiKey()) {
+    return fallbackAnalyzeInsights(predictedCategory, dashboardSnapshot, "Gemini key missing. Local fallback used.");
+  }
+
+  const prompt = `
+You are helping a waste segregation app.
+An image is already classified by local ML.
+Use this category as primary truth and provide simple user guidance.
+
+Predicted category: ${predictedCategory}
+Confidence: ${confidence}
+Item label: ${itemType}
+Estimated weight: ${estimatedWeightKg} kg
+Dashboard snapshot: ${JSON.stringify(dashboardSnapshot || {})}
+
+Return strict JSON only:
+{
+  "recommendedAction": "2-3 short lines, simple and practical.",
+  "alternativeActions": ["short action 1", "short action 2", "short action 3"],
+  "estimatedCarbonSavedKg": 0.0,
+  "reason": "short reason",
+  "dashboardSummary": "1-2 line summary using dashboard snapshot"
+}
+`.trim();
+
+  try {
+    const output = await generateContent(
+      [
+        { text: prompt },
+        { inlineData: { mimeType: mimeType || "image/jpeg", data: imageBase64 } },
+      ],
+      VISION_MODELS
+    );
+
+    const parsed = safeParseJSON(output) || extractJsonObject(output);
+    if (!parsed || typeof parsed !== "object") {
+      return {
+        ...fallbackAnalyzeInsights(
+          predictedCategory,
+          dashboardSnapshot,
+          "Gemini returned non-JSON response. Text fallback used."
+        ),
+        recommendedAction: output.split("\n").slice(0, 3).join("\n"),
+      };
+    }
+
+    return {
+      recommendedAction: String(parsed.recommendedAction || "").trim(),
+      alternativeActions: Array.isArray(parsed.alternativeActions)
+        ? parsed.alternativeActions.map((v) => String(v)).slice(0, 3)
+        : [],
+      estimatedCarbonSavedKg: Number(parsed.estimatedCarbonSavedKg),
+      reason: String(parsed.reason || "").trim(),
+      dashboardSummary: String(parsed.dashboardSummary || "").trim(),
+    };
+  } catch (error) {
+    return fallbackAnalyzeInsights(
+      predictedCategory,
+      dashboardSnapshot,
+      `Gemini request failed: ${error.message}`
+    );
+  }
 }
 
 async function createTextEmbedding(text) {
-  if (!GEMINI_API_KEY) {
-    return [];
-  }
+  if (!hasApiKey()) return [];
 
-  for (const model of DEFAULT_EMBEDDING_MODELS) {
-    const urls = buildGeminiUrls(model, "embedContent");
+  for (const model of EMBEDDING_MODELS) {
+    const urls = endpointUrls(model, "embedContent");
     for (const url of urls) {
       try {
         const response = await fetchWithTimeout(url, {
@@ -101,47 +201,32 @@ async function createTextEmbedding(text) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: `models/${model}`,
-            content: {
-              parts: [{ text }],
-            },
+            content: { parts: [{ text }] },
           }),
         });
-
-        if (!response.ok) {
-          continue;
-        }
-
+        if (!response.ok) continue;
         const data = await response.json();
         const values = data?.embedding?.values || [];
         if (values.length) return values;
       } catch {
-        // Try next endpoint/model.
+        // Try next url/model.
       }
     }
   }
-
   return [];
 }
 
 async function generateEcoReply({ userMessage, contextTexts }) {
-  const hasContext = contextTexts.length > 0;
+  const hasContext = Array.isArray(contextTexts) && contextTexts.length > 0;
   const contextBlock = hasContext
     ? contextTexts.map((text, idx) => `Context ${idx + 1}: ${text}`).join("\n")
     : "No context found.";
 
   const prompt = `
-You are ECO, an English-only voice chatbot that can answer both:
-1) General user questions
-2) Sustainability/dashboard questions
-
-Rules:
-- Reply only in English.
-- Keep responses concise, clear, and practical.
-- If the user asks about waste, carbon, dashboard totals, or past analyses, use the provided context.
-- If the question is general (not related to waste/dashboard), answer normally using your general knowledge.
-- Do not force dashboard context into unrelated answers.
-- If information is missing for a data-specific request, say what is missing.
-- If no context is available but user asks about waste segregation, still provide accurate best-practice guidance from your own knowledge.
+You are ECO, an English-only sustainability chatbot.
+- Reply in clear, concise English.
+- Use context when relevant.
+- If context is missing, state what is missing and still offer useful guidance.
 
 Context:
 ${contextBlock}
@@ -151,13 +236,16 @@ ${userMessage}
 `.trim();
 
   try {
-    return await callGeminiGenerateContent([{ text: prompt }]);
+    return await generateContent([{ text: prompt }], TEXT_MODELS);
   } catch {
-    if (!hasContext) {
-      return "I could not read your saved context right now, but here is general guidance: separate wet/biodegradable waste, dry recyclables, and hazardous waste (batteries, chemicals, e-waste) into different bins and follow local collection rules.";
-    }
-    return "I could not reach the AI service right now. Please retry in a moment.";
+    return hasContext
+      ? "I could not reach the AI service right now. Please retry in a moment."
+      : "I could not read saved context right now. General guidance: separate wet, dry, and hazardous waste and follow local disposal rules.";
   }
 }
 
-module.exports = { createTextEmbedding, generateEcoReply };
+module.exports = {
+  createTextEmbedding,
+  generateEcoReply,
+  generateAnalyzeInsightsWithGemini,
+};

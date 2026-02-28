@@ -13,7 +13,7 @@ const botContextSchema = new mongoose.Schema(
     embedding: [{ type: Number, required: true }],
     language: { type: String, default: "en", index: true },
     source: { type: String, default: "manual" },
-    contextKey: { type: String, default: "", index: true },
+    contextKey: { type: String, index: true },
   },
   { timestamps: true }
 );

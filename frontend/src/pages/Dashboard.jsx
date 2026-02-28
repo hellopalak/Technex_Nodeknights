@@ -76,7 +76,7 @@ export default function Dashboard({ user, summary, history }) {
           <p className="text-muted">No analysis history yet. Start by analyzing an image!</p>
         ) : (
           <div className="history-list">
-            {history.map((item) => (
+            {history.map((item) => ( 
               <div key={item._id} className="history-item">
                 <strong>{item.itemType}</strong>
                 <p>
