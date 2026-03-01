@@ -42,13 +42,13 @@ const navStyles = `
     
     
    
-    font-size: 1.1rem;
+    font-size: 1.8rem;
     
     flex-shrink: 0;
   }
   .ww-nav-logo-name {
     font-family: 'Rajdhani', sans-serif;
-    font-size: 1.6rem; font-weight: 700;
+    font-size: 1.7rem; font-weight: 700;
     color: #ffffff;
     letter-spacing: 0.3px;
   }
