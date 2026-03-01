@@ -23,7 +23,17 @@ const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL || "").toLowerCase();
 const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD || "";
 
 app.use(cors({ 
-  origin: true,
+  origin: function (origin, callback) {
+    // 1. Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+
+    // 2. Check if the origin is in our main list or a Vercel preview
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith(".vercel.app")) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true 
 }));
 app.use(express.json({ limit: "25mb" }));
