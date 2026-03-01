@@ -17,7 +17,7 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "https://waste-wise-umber.vercel.app";
 const DEMO_USER_NAME = process.env.DEMO_USER_NAME || "";
 const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL || "").toLowerCase();
 const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD || "";
