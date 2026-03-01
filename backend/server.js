@@ -17,12 +17,15 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "https://waste-wise-umber.vercel.app";
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN  ;
 const DEMO_USER_NAME = process.env.DEMO_USER_NAME || "";
 const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL || "").toLowerCase();
 const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD || "";
 
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(cors({ 
+  origin: true,
+  credentials: true 
+}));
 app.use(express.json({ limit: "25mb" }));
 
 app.use("/api/health", healthRoutes);
