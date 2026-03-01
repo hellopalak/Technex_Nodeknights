@@ -48,8 +48,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {+
-    if (token) {
+  useEffect(() => {
+    if(token) {
       loadDashboard(token);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

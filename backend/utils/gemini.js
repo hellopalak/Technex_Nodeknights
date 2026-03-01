@@ -1,20 +1,16 @@
 const { safeParseJSON } = require("./helpers");
 
-const API_KEY = String(process.env.GEMINI_API_KEY || "").trim();
+const API_KEY = process.env.GEMINI_API_KEY;
 const API_BASE = (process.env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
 const TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 20000);
 
 const TEXT_MODELS = [
   process.env.GEMINI_TEXT_MODEL,
   "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
 ].filter(Boolean);
 
 const VISION_MODELS = [
   process.env.GEMINI_VISION_MODEL,
-  "gemini-1.5-flash",
-  "gemini-2.0-flash",
   "gemini-2.5-flash",
 ].filter(Boolean);
 
@@ -26,6 +22,33 @@ const EMBEDDING_MODELS = [
 
 function hasApiKey() {
   return Boolean(API_KEY);
+}
+
+function sanitizeEcoReply(text = "") {
+  let cleaned = String(text || "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/^[ \t]*\*[ \t]+/gm, "- ")
+    .replace(/[ \t]+\*[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  // Collapse accidental nested duplication such as:
+  // "carbon dioxide equivalent (carbon dioxide equivalent (CO2e))"
+  cleaned = cleaned.replace(
+    /carbon dioxide equivalent\s*\(\s*carbon dioxide equivalent\s*\(\s*CO2e\s*\)\s*\)/gi,
+    "carbon dioxide equivalent (CO2e)"
+  );
+
+  // Expand CO2e only when not already written as "(CO2e)" after an expansion.
+  cleaned = cleaned.replace(/\bCO2e\b(?!\s*\))/gi, "carbon dioxide equivalent (CO2e)");
+
+  // Remove accidental immediate repetition after replacement.
+  cleaned = cleaned.replace(
+    /carbon dioxide equivalent\s*\(CO2e\)\s*\(carbon dioxide equivalent\s*\(CO2e\)\)/gi,
+    "carbon dioxide equivalent (CO2e)"
+  );
+
+  return cleaned;
 }
 
 function extractJsonObject(text) {
@@ -112,7 +135,7 @@ function fallbackAnalyzeInsights(category, dashboardSnapshot, reason) {
     ],
     estimatedCarbonSavedKg: null,
     reason,
-    dashboardSummary: `Current totals: ${Number(d.totalItemsManaged || 0)} items managed, ${Number(d.totalAnalyses || 0)} analyses, ${Number(d.totalCarbonSavedKg || 0).toFixed(2)} kg CO2e saved.`,
+    dashboardSummary: `Current totals: ${Number(d.totalItemsManaged || 0)} items managed, ${Number(d.totalAnalyses || 0)} analyses, ${Number(d.totalCarbonSavedKg || 0).toFixed(2)} kg carbon dioxide equivalent (CO2e) saved.`,
   };
 }
 
@@ -216,17 +239,24 @@ async function createTextEmbedding(text) {
   return [];
 }
 
-async function generateEcoReply({ userMessage, contextTexts }) {
+async function generateEcoReply({ userMessage, contextTexts, language = "en" }) {
   const hasContext = Array.isArray(contextTexts) && contextTexts.length > 0;
   const contextBlock = hasContext
     ? contextTexts.map((text, idx) => `Context ${idx + 1}: ${text}`).join("\n")
     : "No context found.";
+  const targetLanguage = language === "hi" ? "Hindi (Devanagari script)" : "English";
 
   const prompt = `
-You are ECO, an English-only sustainability chatbot.
-- Reply in clear, concise English.
+You are ECO, a sustainability chatbot.
+- Reply in clear, concise ${targetLanguage}.
 - Use context when relevant.
 - If context is missing, state what is missing and still offer useful guidance.
+- Keep practical, action-oriented responses.
+- Keep a professional assistant tone.
+- Explain CO2 as "carbon dioxide" and CO2e as "carbon dioxide equivalent (CO2e)" when first used in a response.
+- Use plain text only. Do not use markdown symbols such as *, **, #, or _.
+- When giving 2 or more recommendations, use numbered points: 1. 2. 3.
+- Keep responses scannable with short paragraphs.
 
 Context:
 ${contextBlock}
@@ -236,11 +266,13 @@ ${userMessage}
 `.trim();
 
   try {
-    return await generateContent([{ text: prompt }], TEXT_MODELS);
+    const raw = await generateContent([{ text: prompt }], TEXT_MODELS);
+    return sanitizeEcoReply(raw);
   } catch {
-    return hasContext
+    const fallback = hasContext
       ? "I could not reach the AI service right now. Please retry in a moment."
       : "I could not read saved context right now. General guidance: separate wet, dry, and hazardous waste and follow local disposal rules.";
+    return sanitizeEcoReply(fallback);
   }
 }
 

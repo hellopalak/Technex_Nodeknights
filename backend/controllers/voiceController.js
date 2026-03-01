@@ -3,6 +3,42 @@ const User = require("../models/User");
 const { WasteClassification } = require("../models/WasteClassification");
 const { createTextEmbedding, generateEcoReply } = require("../utils/gemini");
 
+function normalizeLanguage(input) {
+  const value = String(input || "").trim().toLowerCase();
+  if (!value || value === "auto") return "auto";
+  if (value === "hi" || value.startsWith("hi-")) return "hi";
+  return "en";
+}
+
+function detectLanguageFromMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) return "en";
+  if (/[\u0900-\u097F]/.test(text)) return "hi";
+
+  const lower = text.toLowerCase();
+  const hindiHints = [
+    "kya",
+    "kaise",
+    "kripya",
+    "batao",
+    "namaste",
+    "dhanyavaad",
+    "kachra",
+    "safai",
+    "madad",
+    "mera",
+    "meri",
+    "aap",
+    "nahi",
+    "hain",
+  ];
+  const hintMatches = hindiHints.reduce((count, word) => {
+    return count + (new RegExp(`\\b${word}\\b`, "i").test(lower) ? 1 : 0);
+  }, 0);
+
+  return hintMatches >= 2 ? "hi" : "en";
+}
+
 function cosineSimilarity(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || b.length === 0) return 0;
   if (a.length !== b.length) return 0;
@@ -35,7 +71,7 @@ function buildWasteContextText(entry) {
     `Category: ${entry.category || "unknown"}.`,
     `Confidence: ${entry.confidence || 0}.`,
     `Recommended action: ${entry.recommendedAction || "n/a"}.`,
-    `Carbon saved: ${entry.carbonSavedKg || 0} kg CO2e.`,
+    `Carbon saved: ${entry.carbonSavedKg || 0} kg carbon dioxide equivalent (CO2e).`,
     `Reason: ${entry.reason || "n/a"}.`,
     modelInfo,
     probabilities,
@@ -49,7 +85,7 @@ function buildDashboardSummaryText(user) {
   const categoryCounts = user?.categoryCounts || {};
   return [
     `Dashboard totals for ${user?.name || "user"}.`,
-    `Total CO2 saved till now: ${user?.totalCarbonSavedKg || 0} kg CO2e.`,
+    `Total carbon savings till now: ${user?.totalCarbonSavedKg || 0} kg carbon dioxide equivalent (CO2e).`,
     `Total items managed: ${user?.totalItemsManaged || 0}.`,
     `Total analyses: ${user?.totalAnalyses || 0}.`,
     `Total classifications: ${user?.totalClassifications || 0}.`,
@@ -58,59 +94,88 @@ function buildDashboardSummaryText(user) {
 }
 
 async function syncWasteContexts(userId, sessionId) {
+  // make sure dashboard summary is up‑to‑date; only re-embed if text changes
   const user = await User.findById(userId).lean();
   if (user) {
     const summaryText = buildDashboardSummaryText(user);
-    const summaryEmbedding = await createTextEmbedding(summaryText);
-    if (summaryEmbedding.length) {
-      await BotContext.findOneAndUpdate(
-        {
-          user: userId,
-          sessionId,
-          contextKey: "dashboard:summary",
-        },
-        {
-          $set: {
-            role: "knowledge",
-            text: summaryText,
-            embedding: summaryEmbedding,
-            language: "en",
-            source: "dashboard-summary",
+    const existing = await BotContext.findOne({
+      user: userId,
+      sessionId,
+      contextKey: "dashboard:summary",
+    }).lean();
+
+    if (!existing || existing.text !== summaryText) {
+      const summaryEmbedding = await createTextEmbedding(summaryText);
+      if (summaryEmbedding.length) {
+        await BotContext.findOneAndUpdate(
+          {
+            user: userId,
+            sessionId,
             contextKey: "dashboard:summary",
           },
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
+          {
+            $set: {
+              role: "knowledge",
+              text: summaryText,
+              embedding: summaryEmbedding,
+              language: "en",
+              source: "dashboard-summary",
+              contextKey: "dashboard:summary",
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
     }
   }
 
+  // sync each waste row; skip rows that already have a matching context
   const wasteRows = await WasteClassification.find({ user: userId })
     .sort({ createdAt: -1 })
     .lean();
 
+  // fetch existing contexts for this session
+  const keys = wasteRows.map((r) => `waste:${r._id}`);
+  const existingContexts = await BotContext.find({
+    user: userId,
+    sessionId,
+    role: "knowledge",
+    contextKey: { $in: keys },
+  }).lean();
+  const existingMap = existingContexts.reduce((m, c) => {
+    m[c.contextKey] = c;
+    return m;
+  }, {});
+
   for (const row of wasteRows) {
     const text = buildWasteContextText(row);
-    const embedding = await createTextEmbedding(text);
-    if (!embedding.length) continue;
+    const key = `waste:${row._id.toString()}`;
+    const existing = existingMap[key];
+    if (existing && existing.text === text && Array.isArray(existing.embedding) && existing.embedding.length) {
+      continue; // nothing changed
+    }
 
-    await BotContext.findOneAndUpdate(
-      {
-        user: userId,
-        sessionId,
-        contextKey: `waste:${row._id.toString()}`,
-      },
-      {
-        $set: {
-          role: "knowledge",
-          text,
-          embedding,
-          language: "en",
-          source: "waste-record",
-          contextKey: `waste:${row._id.toString()}`,
+    try {
+      const embedding = await createTextEmbedding(text);
+      if (!embedding.length) continue;
+
+      await BotContext.findOneAndUpdate(
+        { user: userId, sessionId, contextKey: key },
+        {
+          $set: {
+            role: "knowledge",
+            text,
+            embedding,
+            language: "en",
+            source: "waste-record",
+            contextKey: key,
+          },
         },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (err) {
+      console.warn("failed to embed waste row", row._id, err.message);
+    }
   }
 }
 
@@ -126,7 +191,6 @@ async function getKnowledgeContextsFromDb(userId, sessionId, limit = 300) {
   return BotContext.find({
     user: userId,
     sessionId,
-    language: "en",
     role: "knowledge",
   })
     .sort({ createdAt: -1 })
@@ -138,6 +202,10 @@ exports.chat = async (req, res) => {
   try {
     const message = String(req.body.message || "").trim();
     const sessionId = String(req.body.sessionId || "eco-default").trim();
+    const requestedLanguage = normalizeLanguage(req.body.language);
+    const language = requestedLanguage === "auto"
+      ? detectLanguageFromMessage(message)
+      : requestedLanguage;
     const topK = Number(req.body.topK || 4);
 
     if (!message) {
@@ -148,50 +216,51 @@ exports.chat = async (req, res) => {
     const summaryText = user ? buildDashboardSummaryText(user) : "";
 
 
-    try {
-      await syncWasteContexts(req.user.userId, sessionId);
-    } catch (error) {
+    // sync contexts in the background so the reply isn't delayed by embeddings
+    syncWasteContexts(req.user.userId, sessionId).catch((error) => {
       console.warn("ECO context sync skipped:", error.message);
-    }
+    });
 
     const queryEmbedding = await createTextEmbedding(message);
 
     let contextTexts = [];
-    const allContexts = await getKnowledgeContextsFromDb(req.user.userId, sessionId, 300);
-    if (queryEmbedding.length && allContexts.length) {
+    try {
+      const allContexts = await getKnowledgeContextsFromDb(req.user.userId, sessionId, 300);
+      if (queryEmbedding.length && allContexts.length) {
+        const rankedContexts = allContexts
+          .map((item) => ({
+            text: item.text,
+            score: cosineSimilarity(queryEmbedding, item.embedding),
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.max(1, topK))
+          .filter((item) => item.score > 0);
 
-      const rankedContexts = allContexts
-        .map((item) => ({
-          text: item.text,
-          score: cosineSimilarity(queryEmbedding, item.embedding),
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, Math.max(1, topK))
-        .filter((item) => item.score > 0);
+        contextTexts = rankedContexts.map((item) => item.text).filter(Boolean);
+        if (summaryText && !contextTexts.includes(summaryText)) {
+          contextTexts.unshift(summaryText);
+        }
 
-      contextTexts = rankedContexts.map((item) => item.text).filter(Boolean);
-      if (summaryText && !contextTexts.includes(summaryText)) {
-        contextTexts.unshift(summaryText);
-      }
-
-      
-      if (contextTexts.length < Math.max(2, topK)) {
-        const fallbackTexts = allContexts
+        if (contextTexts.length < Math.max(2, topK)) {
+          const fallbackTexts = allContexts
+            .map((item) => item.text)
+            .filter(Boolean)
+            .slice(0, Math.max(2, topK));
+          const merged = [...contextTexts, ...fallbackTexts];
+          contextTexts = [...new Set(merged)];
+        }
+      } else if (allContexts.length) {
+        contextTexts = allContexts
           .map((item) => item.text)
           .filter(Boolean)
-          .slice(0, Math.max(2, topK));
-        const merged = [...contextTexts, ...fallbackTexts];
-        contextTexts = [...new Set(merged)];
+          .slice(0, Math.max(4, topK));
+        if (summaryText && !contextTexts.includes(summaryText)) {
+          contextTexts.unshift(summaryText);
+        }
       }
-    } else if (allContexts.length) {
-
-      contextTexts = allContexts
-        .map((item) => item.text)
-        .filter(Boolean)
-        .slice(0, Math.max(4, topK));
-      if (summaryText && !contextTexts.includes(summaryText)) {
-        contextTexts.unshift(summaryText);
-      }
+    } catch (err) {
+      console.warn("error building RAG contexts", err.message);
+      // fall through to safe defaults below
     }
 
     
@@ -200,7 +269,7 @@ exports.chat = async (req, res) => {
       contextTexts = [summaryText, ...allWasteTexts].filter(Boolean);
     }
 
-    const reply = await generateEcoReply({ userMessage: message, contextTexts });
+    const reply = await generateEcoReply({ userMessage: message, contextTexts, language });
 
     let userTurn = null;
     let assistantTurn = null;
@@ -215,7 +284,7 @@ exports.chat = async (req, res) => {
         role: "user",
         text: message,
         embedding: userEmbedding,
-        language: "en",
+        language,
         source: "chat",
       });
 
@@ -225,7 +294,7 @@ exports.chat = async (req, res) => {
         role: "assistant",
         text: reply,
         embedding: replyEmbedding,
-        language: "en",
+        language,
         source: "chat",
       });
     } catch (error) {
@@ -252,7 +321,6 @@ exports.listContexts = async (req, res) => {
     const contexts = await BotContext.find({
       user: req.user.userId,
       sessionId,
-      language: "en",
       role: "knowledge",
     })
       .sort({ createdAt: -1 })
