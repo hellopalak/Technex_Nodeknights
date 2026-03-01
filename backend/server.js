@@ -21,7 +21,11 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN  ;
 const DEMO_USER_NAME = process.env.DEMO_USER_NAME || "";
 const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL || "").toLowerCase();
 const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD || "";
-
+const allowedOrigins = [
+  "https://waste-wise-umber.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000"
+];
 app.use(cors({ 
   origin: function (origin, callback) {
     // 1. Allow requests with no origin (like mobile apps or curl)
