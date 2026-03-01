@@ -21,24 +21,27 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN  ;
 const DEMO_USER_NAME = process.env.DEMO_USER_NAME || "";
 const DEMO_USER_EMAIL = (process.env.DEMO_USER_EMAIL || "").toLowerCase();
 const DEMO_USER_PASSWORD = process.env.DEMO_USER_PASSWORD || "";
+// 1. First, define the list of allowed origins
 const allowedOrigins = [
   "https://waste-wise-umber.vercel.app",
   "http://localhost:5173",
   "http://localhost:3000"
 ];
-app.use(cors({ 
+
+// 2. Then, configure CORS to use that list
+app.use(cors({
   origin: function (origin, callback) {
-    // 1. Allow requests with no origin (like mobile apps or curl)
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
 
-    // 2. Check if the origin is in our main list or a Vercel preview
+    // If the website is in our list OR is a Vercel preview link, allow it
     if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith(".vercel.app")) {
-      return callback(null, true);
+      callback(null, true);
     } else {
-      return callback(new Error('Not allowed by CORS'));
+      callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true 
+  credentials: true
 }));
 app.use(express.json({ limit: "25mb" }));
 
