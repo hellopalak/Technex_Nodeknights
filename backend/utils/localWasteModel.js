@@ -9,14 +9,14 @@ const CWD = process.cwd();
 const MODULE_DIR = path.resolve(__dirname, "..");
 const DEFAULT_MODEL_DIR_CANDIDATES = [
   ENV_MODEL_DIR,
-  path.resolve(CWD, "../My image model"),
-  path.resolve(CWD, "../my image model"),
-  path.resolve(CWD, "My image model"),
-  path.resolve(CWD, "my image model"),
-  path.resolve(MODULE_DIR, "../My image model"),
-  path.resolve(MODULE_DIR, "../my image model"),
-  path.resolve(MODULE_DIR, "../../My image model"),
-  path.resolve(MODULE_DIR, "../../my image model"),
+  path.resolve(CWD, "../modelLM"),
+
+  path.resolve(CWD, "modelLM"),
+  path.resolve(CWD, "modelLM"),
+  path.resolve(MODULE_DIR, "../modelLM"),
+  
+  path.resolve(MODULE_DIR, "../../modelLM"),
+  path.resolve(MODULE_DIR, "../../modelLM"),
 ].filter(Boolean);
 
 let cached = null;

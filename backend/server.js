@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 require("dotenv").config();
 
 const User = require("./models/User");
+const BotContext = require("./models/botContext");
 const { createPasswordRecord } = require("./utils/crypto");
 
 const authRoutes = require("./routes/auth");
@@ -58,6 +59,7 @@ async function startServer() {
 
   try {
     await mongoose.connect(MONGO_URI);
+    await BotContext.ensureBotContextIndexes();
     await ensureDemoUser();
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
